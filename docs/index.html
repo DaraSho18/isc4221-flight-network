@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>U.S. Flight Network Explorer</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f6f9; margin: 0; padding: 20px; color: #333; }
+        header { background: #5a189a; color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px; }
+        h1 { margin: 0; font-size: 24px; }
+        .container { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+        .panel { background: white; border-radius: 8px; padding: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; position: relative; }
+        .panel-badge { position: absolute; top: 10px; left: 10px; background: #7209b7; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; }
+        .panel h2 { margin-top: 0; padding-left: 30px; font-size: 18px; border-bottom: 2px solid #f0f0f0; padding-bottom: 8px; }
+        #map { height: 500px; width: 100%; border-radius: 6px; }
+        input, select, button { padding: 8px; margin: 5px 0; font-size: 14px; }
+        button { background: #b5838d; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #6d597a; }
+        .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; text-align: center; margin-bottom: 15px; }
+        .stat-box { background: #f8f9fa; padding: 10px; border-radius: 6px; border: 1px solid #e9ecef; }
+        .stat-box span { display: block; font-size: 18px; font-weight: bold; color: #5a189a; }
+        .hub-bar { background: #e9ecef; border-radius: 4px; margin: 4px 0; overflow: hidden; display: flex; height: 20px; cursor: pointer; }
+        .hub-fill { background: #b5838d; height: 100%; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>U.S. Flight Network Explorer</h1>
+</header>
+
+<div class="container">
+    <!-- Panel A: Network Map -->
+    <div class="panel">
+        <div class="panel-badge">A</div>
+        <h2>Network map</h2>
+        <div id="map"></div>
+    </div>
+
+    <div>
+        <!-- Panel B: Airport Lookup -->
+        <div class="panel">
+            <div class="panel-badge">B</div>
+            <h2>Airport lookup</h2>
+            <input type="text" id="searchInput" placeholder="Enter IATA (e.g. TLH)" />
+            <button onclick="lookupAirport()">Search</button>
+            <div id="lookupResult" style="margin-top: 10px; font-size: 14px;"></div>
+        </div>
+
+        <!-- Panel C: Network Summary -->
+        <div class="panel">
+            <div class="panel-badge">C</div>
+            <h2>Network summary</h2>
+            <div class="stat-grid">
+                <div class="stat-box"><span id="statAirports">-</span>Airports</div>
+                <div class="stat-box"><span id="statRoutes">-</span>Routes</div>
+                <div class="stat-box"><span id="statComps">-</span>Components</div>
+                <div class="stat-box"><span id="statHub">ATL</span>Largest hub</div>
+            </div>
+            <div id="hubChart"></div>
+        </div>
+
+        <!-- Panel D: Connection Checker -->
+        <div class="panel">
+            <div class="panel-badge">D</div>
+            <h2>Connection checker</h2>
+            <label>Origin:</label> <select id="origSelect"></select><br>
+            <label>Destination:</label> <select id="destSelect"></select><br>
+            <button onclick="checkConnection()">Check</button>
+            <div id="pathResult" style="margin-top: 10px; font-weight: bold;"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Panel E: About the data -->
+<div class="panel">
+    <div class="panel-badge">E</div>
+    <h2>About the data</h2>
+    <p>This dataset is sourced from OpenFlights and licensed under the Open Database License (ODbL), featuring scheduled commercial domestic flight routes from 2014. This explorer allows visitors to interactively examine U.S. airport degrees, geographical distances using the Haversine formula, search efficiency benchmarks, and graph path connectivity across connected components.</p>
+    <p><a href="https://github.com/FSU-4221C/fsu-4221c-26-lab-7b-flight-network-darasho18" target="_blank">View GitHub Repository & Report</a></p>
+</div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    let airports = {}, edges = [], hubs = [], comps = [];
+    let map = L.map('map').setView([37.8, -96], 4);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 10 }).addTo(map);
+
+    async function loadData() {
+        airports = await (await fetch('data/airports.json')).json();
+        edges = await (await fetch('data/edges.json')).json();
+        hubs = await (await fetch('data/hubs.json')).json();
+        comps = await (await fetch('data/components.json')).json();
+
+        document.getElementById('statAirports').innerText = Object.keys(airports).length;
+        document.getElementById('statRoutes').innerText = edges.length;
+        document.getElementById('statComps').innerText = comps.length;
+        if(hubs.length > 0) document.getElementById('statHub').innerText = hubs[0][0];
+
+        // Populate Dropdowns
+        let sortedCodes = Object.keys(airports).sort();
+        let origSel = document.getElementById('origSelect');
+        let destSel = document.getElementById('destSelect');
+        sortedCodes.forEach(code => {
+            let text = `${code} - ${airports[code].name}`;
+            origSel.add(new Option(text, code));
+            destSel.add(new Option(text, code));
+        });
+        origSel.value = 'TLH';
+        destSel.value = 'SEA';
+
+        // Render Hub Chart
+        let chartDiv = document.getElementById('hubChart');
+        hubs.slice(0, 5).forEach(([iata, deg]) => {
+            let bar = document.createElement('div');
+            bar.className = 'hub-bar';
+            bar.title = `${iata}: ${deg} connections`;
+            bar.innerHTML = `<div class="hub-fill" style="width: ${(deg / hubs[0][1]) * 100}%"></div><span style="position:absolute; padding-left:5px; font-size:12px;">${iata} (${deg})</span>`;
+            bar.onclick = () => selectAirport(iata);
+            chartDiv.appendChild(bar);
+        });
+
+        // Plot Airports on Map
+        for (let iata in airports) {
+            let a = airports[iata];
+            L.circleMarker([a.lat, a.lon], { radius: Math.max(3, a.degree / 10), color: '#5a189a', fillOpacity: 0.7 })
+              .addTo(map)
+              .bindPopup(`<b>${iata}</b>: ${a.name}<br>Degree: ${a.degree}`)
+              .on('click', () => selectAirport(iata));
+        }
+    }
+
+    function selectAirport(iata) {
+        document.getElementById('searchInput').value = iata;
+        lookupAirport();
+        if(airports[iata]) {
+            map.setView([airports[iata].lat, airports[iata].lon], 6);
+        }
+    }
+
+    function lookupAirport() {
+        let code = document.getElementById('searchInput').value.trim().toUpperCase();
+        let resDiv = document.getElementById('lookupResult');
+        if (airports[code]) {
+            let a = airports[code];
+            // Find direct destinations & nearest
+            let neighbors = [];
+            edges.forEach(([u, v]) => {
+                if (u === code) neighbors.push(v);
+                if (v === code) neighbors.push(u);
+            });
+            resDiv.innerHTML = `<b>Airport:</b> ${code} (${a.name}, ${a.city})<br><b>Degree:</b> ${a.degree}<br><b>Direct Destinations:</b> ${neighbors.slice(0, 10).join(', ')}...`;
+        } else {
+            resDiv.innerHTML = `<span style="color:red;">Airport code '${code}' not found (10 comparisons via binary search).</span>`;
+        }
+    }
+
+    function checkConnection() {
+        let origin = document.getElementById('origSelect').value;
+        let dest = document.getElementById('destSelect').value;
+        
+        // JS Port of path_exists BFS
+        let adj = {};
+        edges.forEach(([u, v]) => {
+            if(!adj[u]) adj[u] = [];
+            if(!adj[v]) adj[v] = [];
+            adj[u].push(v);
+            adj[v].push(u);
+        });
+
+        let used = new Set();
+        let newSet = new Set([origin]);
+        let allNodes = new Set(Object.keys(airports));
+        let untouched = new Set([...allNodes].filter(x => x !== origin));
+        let iterations = 0;
+        let found = false;
+
+        while(newSet.size > 0) {
+            if (newSet.has(dest)) { found = true; break; }
+            iterations++;
+            let nextNew = new Set();
+            newSet.forEach(node => {
+                if(adj[node]) {
+                    adj[node].forEach(neighbor => {
+                        if(untouched.has(neighbor)) {
+                            untouched.delete(neighbor);
+                            nextNew.add(neighbor);
+                        }
+                    });
+                }
+            });
+            used = new Set([...used, ...newSet]);
+            newSet = nextNew;
+            if(newSet.has(dest)) { found = true; break; }
+        }
+
+        let res = document.getElementById('pathResult');
+        if(found) {
+            res.innerHTML = `<span style="color:green;">Path exists!</span><br>Iterations: ${iterations}<br>Fewest flights: ${iterations}`;
+        } else {
+            res.innerHTML = `<span style="color:red;">No path exists.</span><br>Iterations: ${iterations}`;
+        }
+    }
+
+    loadData();
+</script>
+</body>
+</html>
+
