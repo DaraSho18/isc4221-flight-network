@@ -20,11 +20,13 @@
         .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; text-align: center; margin-bottom: 15px; }
         .stat-box { background: #f8f9fa; padding: 10px; border-radius: 6px; border: 1px solid #e9ecef; }
         .stat-box span { display: block; font-size: 18px; font-weight: bold; color: #5a189a; }
-        .hub-bar { background: #e9ecef; border-radius: 4px; margin: 4px 0; overflow: hidden; display: flex; height: 20px; cursor: pointer; }
+        .hub-bar { background: #e9ecef; border-radius: 4px; margin: 4px 0; overflow: hidden; display: flex; height: 20px; cursor: pointer; position: relative; }
         .hub-fill { background: #b5838d; height: 100%; }
         /* Map Legend Styling */
-        .info.legend { background: white; padding: 10px; border-radius: 5px; box-shadow: 0 1.5px 3px rgba(0,0,0,0.2); font-size: 12px; line-height: 18px; color: #555; }
-        .info.legend i { width: 12px; height: 12px; float: left; margin-right: 8px; border-radius: 50%; background: #5a189a; opacity: 0.8; }
+        .info.legend { background: white; padding: 8px 12px; border-radius: 5px; box-shadow: 0 1px 4px rgba(0,0,0,0.3); font-size: 12px; line-height: 18px; }
+        .info.legend div { display: flex; align-items: center; margin-bottom: 4px; }
+        .legend-node { width: 10px; height: 10px; background: #5a189a; border-radius: 50%; margin-right: 8px; display: inline-block; }
+        .legend-line { width: 18px; height: 2px; background: rgba(90, 24, 154, 0.25); margin-right: 8px; display: inline-block; }
     </style>
 </head>
 <body>
@@ -91,58 +93,86 @@
     let map = L.map('map').setView([37.8, -96], 4);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 10 }).addTo(map);
 
-    // Add Map Legend
-    let legend = L.control({position: 'bottomright'});
+    // Map Legend Control
+    let legend = L.control({ position: 'bottomright' });
     legend.onAdd = function (map) {
         let div = L.DomUtil.create('div', 'info legend');
-        div.innerHTML = '<b>Map Legend</b><br>' +
-                        '<i style="background: #5a189a;"></i> Airport Node<br>' +
-                        '<small>(Size proportional to degree)</small>';
+        div.innerHTML = `
+            <b>Legend</b><br>
+            <div><span class="legend-node"></span> Airport Node (Sized by degree)</div>
+            <div><span class="legend-line"></span> Flight Route</div>
+        `;
         return div;
     };
     legend.addTo(map);
 
     async function loadData() {
-        airports = await (await fetch('data/airports.json')).json();
-        edges = await (await fetch('data/edges.json')).json();
-        hubs = await (await fetch('data/hubs.json')).json();
-        comps = await (await fetch('data/components.json')).json();
+        try {
+            airports = await (await fetch('data/airports.json')).json();
+            edges = await (await fetch('data/edges.json')).json();
+            hubs = await (await fetch('data/hubs.json')).json();
+            comps = await (await fetch('data/components.json')).json();
 
-        document.getElementById('statAirports').innerText = Object.keys(airports).length;
-        document.getElementById('statRoutes').innerText = edges.length;
-        document.getElementById('statComps').innerText = comps.length;
-        if(hubs.length > 0) document.getElementById('statHub').innerText = hubs[0][0];
+            document.getElementById('statAirports').innerText = Object.keys(airports).length;
+            document.getElementById('statRoutes').innerText = edges.length;
+            document.getElementById('statComps').innerText = comps.length;
+            if(hubs.length > 0) document.getElementById('statHub').innerText = hubs[0][0];
 
-        // Populate Dropdowns
-        let sortedCodes = Object.keys(airports).sort();
-        let origSel = document.getElementById('origSelect');
-        let destSel = document.getElementById('destSelect');
-        sortedCodes.forEach(code => {
-            let text = `${code} -${airports[code].name}`;
-            origSel.add(new Option(text, code));
-            destSel.add(new Option(text, code));
-        });
-        origSel.value = 'TLH';
-        destSel.value = 'SEA';
+            // Populate Dropdowns
+            let sortedCodes = Object.keys(airports).sort();
+            let origSel = document.getElementById('origSelect');
+            let destSel = document.getElementById('destSelect');
+            sortedCodes.forEach(code => {
+                let text = `${code} - ${airports[code].name}`;
+                origSel.add(new Option(text, code));
+                destSel.add(new Option(text, code));
+            });
+            origSel.value = 'TLH';
+            destSel.value = 'SEA';
 
-        // Render Hub Chart
-        let chartDiv = document.getElementById('hubChart');
-        hubs.slice(0, 5).forEach(([iata, deg]) => {
-            let bar = document.createElement('div');
-            bar.className = 'hub-bar';
-            bar.title = `${iata}:${deg} connections`;
-            bar.innerHTML = `<div class="hub-fill" style="width: ${(deg / hubs[0][1]) * 100}%"></div><span style="position:absolute; padding-left:5px; font-size:12px;">${iata} (${deg})</span>`;
-            bar.onclick = () => selectAirport(iata);
-            chartDiv.appendChild(bar);
-        });
+            // Render Hub Chart
+            let chartDiv = document.getElementById('hubChart');
+            chartDiv.innerHTML = '';
+            hubs.slice(0, 5).forEach(([iata, deg]) => {
+                let bar = document.createElement('div');
+                bar.className = 'hub-bar';
+                bar.title = `${iata}: ${deg} connections`;
+                bar.innerHTML = `<div class="hub-fill" style="width: ${(deg / hubs[0][1]) * 100}%"></div><span style="position:absolute; padding-left:5px; font-size:12px; line-height:20px; font-weight:bold;">${iata} (${deg})</span>`;
+                bar.onclick = () => selectAirport(iata);
+                chartDiv.appendChild(bar);
+            });
 
-        // Plot Airports on Map
-        for (let iata in airports) {
-            let a = airports[iata];
-            L.circleMarker([a.lat, a.lon], { radius: Math.max(3, a.degree / 10), color: '#5a189a', fillOpacity: 0.7 })
-              .addTo(map)
-              .bindPopup(`<b>${iata}</b>: ${a.name}<br>Degree:${a.degree}`)
-              .on('click', () => selectAirport(iata));
+            // Draw Semi-Transparent Route Lines First (so they sit underneath nodes)
+            edges.forEach(([u, v]) => {
+                if (airports[u] && airports[v]) {
+                    let latlngs = [
+                        [airports[u].lat, airports[u].lon],
+                        [airports[v].lat, airports[v].lon]
+                    ];
+                    L.polyline(latlngs, {
+                        color: '#5a189a',
+                        weight: 0.8,
+                        opacity: 0.15
+                    }).addTo(map);
+                }
+            });
+
+            // Plot Airport Markers
+            for (let iata in airports) {
+                let a = airports[iata];
+                L.circleMarker([a.lat, a.lon], { 
+                    radius: Math.max(3, a.degree / 10), 
+                    color: '#5a189a', 
+                    fillColor: '#7209b7',
+                    fillOpacity: 0.75,
+                    weight: 1
+                })
+                .addTo(map)
+                .bindPopup(`<b>${iata}</b>: ${a.name}<br>City: ${a.city}<br>Degree: ${a.degree}`)
+                .on('click', () => selectAirport(iata));
+            }
+        } catch (err) {
+            console.error("Data loading error:", err);
         }
     }
 
@@ -164,7 +194,7 @@
                 if (u === code) neighbors.push(v);
                 if (v === code) neighbors.push(u);
             });
-            resDiv.innerHTML = `<b>Airport:</b> ${code} (${a.name},${a.city})<br><b>Degree:</b> ${a.degree}<br><b>Direct Destinations:</b>${neighbors.slice(0, 10).join(', ')}...`;
+            resDiv.innerHTML = `<b>Airport:</b> ${code} (${a.name}, ${a.city})<br><b>Degree:</b> ${a.degree}<br><b>Direct Destinations:</b> ${neighbors.slice(0, 10).join(', ')}...`;
         } else {
             resDiv.innerHTML = `<span style="color:red;">Airport code '${code}' not found (10 comparisons via binary search).</span>`;
         }
@@ -208,8 +238,18 @@
             if(newSet.has(dest)) { found = true; break; }
         }
 
-    let res = document.getElementById('pathResult');
-    if(found) {
-        res.innerHTML = `<span style="color:green
+        let res = document.getElementById('pathResult');
+        if(found) {
+            res.innerHTML = `<span style="color:green;">Path exists!</span><br>Iterations: ${iterations}<br>Fewest flights: ${iterations}`;
+        } else {
+            res.innerHTML = `<span style="color:red;">No path exists.</span><br>Iterations: ${iterations}`;
+        }
+    }
 
-        
+    loadData();
+</script>
+</body>
+</html>
+
+
+
