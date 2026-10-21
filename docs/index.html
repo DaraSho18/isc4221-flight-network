@@ -22,6 +22,9 @@
         .stat-box span { display: block; font-size: 18px; font-weight: bold; color: #5a189a; }
         .hub-bar { background: #e9ecef; border-radius: 4px; margin: 4px 0; overflow: hidden; display: flex; height: 20px; cursor: pointer; }
         .hub-fill { background: #b5838d; height: 100%; }
+        /* Map Legend Styling */
+        .info.legend { background: white; padding: 10px; border-radius: 5px; box-shadow: 0 1.5px 3px rgba(0,0,0,0.2); font-size: 12px; line-height: 18px; color: #555; }
+        .info.legend i { width: 12px; height: 12px; float: left; margin-right: 8px; border-radius: 50%; background: #5a189a; opacity: 0.8; }
     </style>
 </head>
 <body>
@@ -88,6 +91,17 @@
     let map = L.map('map').setView([37.8, -96], 4);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 10 }).addTo(map);
 
+    // Add Map Legend
+    let legend = L.control({position: 'bottomright'});
+    legend.onAdd = function (map) {
+        let div = L.DomUtil.create('div', 'info legend');
+        div.innerHTML = '<b>Map Legend</b><br>' +
+                        '<i style="background: #5a189a;"></i> Airport Node<br>' +
+                        '<small>(Size proportional to degree)</small>';
+        return div;
+    };
+    legend.addTo(map);
+
     async function loadData() {
         airports = await (await fetch('data/airports.json')).json();
         edges = await (await fetch('data/edges.json')).json();
@@ -104,7 +118,7 @@
         let origSel = document.getElementById('origSelect');
         let destSel = document.getElementById('destSelect');
         sortedCodes.forEach(code => {
-            let text = `${code} - ${airports[code].name}`;
+            let text = `${code} -${airports[code].name}`;
             origSel.add(new Option(text, code));
             destSel.add(new Option(text, code));
         });
@@ -116,7 +130,7 @@
         hubs.slice(0, 5).forEach(([iata, deg]) => {
             let bar = document.createElement('div');
             bar.className = 'hub-bar';
-            bar.title = `${iata}: ${deg} connections`;
+            bar.title = `${iata}:${deg} connections`;
             bar.innerHTML = `<div class="hub-fill" style="width: ${(deg / hubs[0][1]) * 100}%"></div><span style="position:absolute; padding-left:5px; font-size:12px;">${iata} (${deg})</span>`;
             bar.onclick = () => selectAirport(iata);
             chartDiv.appendChild(bar);
@@ -127,7 +141,7 @@
             let a = airports[iata];
             L.circleMarker([a.lat, a.lon], { radius: Math.max(3, a.degree / 10), color: '#5a189a', fillOpacity: 0.7 })
               .addTo(map)
-              .bindPopup(`<b>${iata}</b>: ${a.name}<br>Degree: ${a.degree}`)
+              .bindPopup(`<b>${iata}</b>: ${a.name}<br>Degree:${a.degree}`)
               .on('click', () => selectAirport(iata));
         }
     }
@@ -145,13 +159,12 @@
         let resDiv = document.getElementById('lookupResult');
         if (airports[code]) {
             let a = airports[code];
-            // Find direct destinations & nearest
             let neighbors = [];
             edges.forEach(([u, v]) => {
                 if (u === code) neighbors.push(v);
                 if (v === code) neighbors.push(u);
             });
-            resDiv.innerHTML = `<b>Airport:</b> ${code} (${a.name}, ${a.city})<br><b>Degree:</b> ${a.degree}<br><b>Direct Destinations:</b> ${neighbors.slice(0, 10).join(', ')}...`;
+            resDiv.innerHTML = `<b>Airport:</b> ${code} (${a.name},${a.city})<br><b>Degree:</b> ${a.degree}<br><b>Direct Destinations:</b>${neighbors.slice(0, 10).join(', ')}...`;
         } else {
             resDiv.innerHTML = `<span style="color:red;">Airport code '${code}' not found (10 comparisons via binary search).</span>`;
         }
@@ -161,7 +174,6 @@
         let origin = document.getElementById('origSelect').value;
         let dest = document.getElementById('destSelect').value;
         
-        // JS Port of path_exists BFS
         let adj = {};
         edges.forEach(([u, v]) => {
             if(!adj[u]) adj[u] = [];
@@ -196,16 +208,8 @@
             if(newSet.has(dest)) { found = true; break; }
         }
 
-        let res = document.getElementById('pathResult');
-        if(found) {
-            res.innerHTML = `<span style="color:green;">Path exists!</span><br>Iterations: ${iterations}<br>Fewest flights: ${iterations}`;
-        } else {
-            res.innerHTML = `<span style="color:red;">No path exists.</span><br>Iterations: ${iterations}`;
-        }
-    }
+    let res = document.getElementById('pathResult');
+    if(found) {
+        res.innerHTML = `<span style="color:green
 
-    loadData();
-</script>
-</body>
-</html>
-
+        
